@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter};
 pub struct RuntimeDspConfig {
     pub smoothing: f32,
     pub gain: f32,
+    pub emit_interval_ms: u64,
 }
 
 #[derive(Clone)]
@@ -52,6 +53,7 @@ impl RuntimeDspState {
             .unwrap_or(RuntimeDspConfig {
                 smoothing: 0.58,
                 gain: 1.8,
+                emit_interval_ms: quality_emit_interval_ms("ultra"),
             })
     }
 
@@ -80,6 +82,21 @@ pub fn runtime_config_from_settings(settings: &settings::AppSettings) -> Runtime
     RuntimeDspConfig {
         smoothing: settings.smoothing.clamp(0.0, 0.95),
         gain: settings.gain.clamp(0.2, 6.0),
+        emit_interval_ms: quality_emit_interval_ms(&settings.quality),
+    }
+}
+
+/// 将画质档位映射到 IPC 发帧节流间隔（毫秒）。
+fn quality_emit_interval_ms(raw_quality: &str) -> u64 {
+    let normalized = raw_quality.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        // Ultra：目标约 120Hz（8.3ms），取 8ms。
+        "ultra" => 8,
+        // High：目标约 90Hz（11.1ms），取 11ms。
+        "high" => 11,
+        // Balanced：目标约 60Hz（16.7ms），取 16ms。
+        "balanced" => 16,
+        _ => 11,
     }
 }
 
@@ -94,7 +111,7 @@ pub fn start_analysis_emitter(
             run_realtime_analysis_loop(app.clone(), runtime_dsp.clone(), runtime_visual.clone())
         {
             eprintln!("realtime audio loop failed, fallback to mock emitter: {error}");
-            run_mock_analysis_loop(app, runtime_visual);
+            run_mock_analysis_loop(app, runtime_dsp, runtime_visual);
         }
     });
 }
@@ -105,9 +122,6 @@ fn run_realtime_analysis_loop(
     runtime_dsp: RuntimeDspState,
     runtime_visual: RuntimeVisualState,
 ) -> Result<(), String> {
-    // 不再提供帧率档位选择，固定为高频推送，实际渲染帧率由机器性能决定。
-    let target_emit_ms: u64 = 6;
-
     let (chunk_tx, chunk_rx) = mpsc::channel::<CaptureChunk>();
     let runtime = capture::start_loopback_capture(chunk_tx)?;
 
@@ -148,7 +162,8 @@ fn run_realtime_analysis_loop(
         }
 
         let now_ts = now_timestamp_ms();
-        if now_ts.saturating_sub(last_emit_ts) < target_emit_ms {
+        let current_config = runtime_dsp.get();
+        if now_ts.saturating_sub(last_emit_ts) < current_config.emit_interval_ms {
             continue;
         }
 
@@ -156,8 +171,7 @@ fn run_realtime_analysis_loop(
             continue;
         }
 
-        // 关键行：每次推送前读取运行时参数，保证平滑和增益滑块是“实时生效”。
-        let current_config = runtime_dsp.get();
+        // 关键行：每次推送前读取运行时参数，保证平滑、增益、发帧频率都“实时生效”。
         if (current_config.smoothing - last_config.smoothing).abs() > f32::EPSILON
             || (current_config.gain - last_config.gain).abs() > f32::EPSILON
         {
@@ -172,7 +186,8 @@ fn run_realtime_analysis_loop(
         let analysis = analyzer.analyze(&sample_buffer[frame_window_start..]);
 
         // 延迟估算：采样到当前推送的时间差 + 当前发送节流间隔。
-        let latency_ms = now_ts.saturating_sub(latest_capture_ts) as f32 + target_emit_ms as f32;
+        let latency_ms =
+            now_ts.saturating_sub(latest_capture_ts) as f32 + current_config.emit_interval_ms as f32;
 
         if runtime_visual.is_paused() {
             continue;
@@ -193,12 +208,18 @@ fn run_realtime_analysis_loop(
 }
 
 /// 模拟链路：真实采集不可用时提供可预测波形，便于前端验证渲染逻辑。
-fn run_mock_analysis_loop(app: AppHandle, runtime_visual: RuntimeVisualState) {
+fn run_mock_analysis_loop(
+    app: AppHandle,
+    runtime_dsp: RuntimeDspState,
+    runtime_visual: RuntimeVisualState,
+) {
     let mut phase: f32 = 0.0;
 
     loop {
+        let emit_interval_ms = runtime_dsp.get().emit_interval_ms;
+
         if runtime_visual.is_paused() {
-            thread::sleep(Duration::from_millis(16));
+            thread::sleep(Duration::from_millis(emit_interval_ms));
             continue;
         }
 
@@ -217,11 +238,11 @@ fn run_mock_analysis_loop(app: AppHandle, runtime_visual: RuntimeVisualState) {
             bins,
             rms: ((phase * 1.2).sin() * 0.5 + 0.5).clamp(0.0, 1.0),
             peak: ((phase * 0.7).cos() * 0.5 + 0.5).clamp(0.0, 1.0),
-            latency_estimate_ms: 20.0,
+            latency_estimate_ms: emit_interval_ms as f32 + 4.0,
         };
 
         let _ = app.emit("audio:analysis_frame", frame);
-        thread::sleep(Duration::from_millis(16));
+        thread::sleep(Duration::from_millis(emit_interval_ms));
     }
 }
 

@@ -1,7 +1,7 @@
-﻿// 统一维护简体中文文案，避免组件内硬编码文本。
+// 统一维护简体中文文案，避免组件内硬编码文本。
 export const zhCN = {
   title: "tt-audio-lab 音频桌面组件",
-  subtitle: "M3 可视化与桌面行为阶段（Tauri + Vue + Rust）",
+  subtitle: "M4 性能分层与自动降级阶段（Tauri + Vue + Rust）",
   statusLabel: "运行状态",
   status: {
     idle: "空闲",
@@ -22,6 +22,11 @@ export const zhCN = {
     smoothingHelp: "越大越平稳，越小越灵敏",
     gain: "增益",
     gainHelp: "提高整体响应幅度",
+    quality: "画质档位",
+    qualityHelp: "高负载时会按 Ultra -> High -> Balanced 自动降级",
+    qualityUltra: "Ultra（240Hz 优先）",
+    qualityHigh: "High（120Hz 稳定）",
+    qualityBalanced: "Balanced（60Hz 节能）",
     windowMode: "窗口模式",
     windowModeHelp: "普通模式保留标题栏，组件/覆盖层模式会隐藏标题栏",
     monitor: "目标显示器",
@@ -38,7 +43,14 @@ export const zhCN = {
     overlay: "悬浮覆盖层"
   },
   metrics: {
-    device: "采集设备"
+    device: "采集设备",
+    quality: "当前画质",
+    renderer: "渲染后端",
+    fps: "FPS",
+    frameTime: "当前帧耗时",
+    p95: "帧耗时 P95",
+    autoDowngrade: "性能压力持续偏高，已自动降级",
+    autoDowngradeSaveFailed: "后端保存失败"
   },
   audio: {
     discovered: "已发现设备数"
@@ -48,7 +60,13 @@ export const zhCN = {
     styles: {
       bars: "柱状",
       wave: "波形",
-      radial: "环形"
+      radial: "环形",
+      mirror: "镜像脉冲",
+      spiral: "螺旋星轨",
+      matrix: "矩阵能量",
+      particles: "粒子爆发",
+      waterfall: "光谱瀑布",
+      radar: "雷达扇扫"
     }
   }
 } as const;
